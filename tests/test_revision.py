@@ -372,6 +372,165 @@ class DescribeRun_delete_tracked:
         return instance_mock(request, DocumentPart)
 
 
+class DescribeRun_replace_tracked_at:
+    """Unit-test suite for `Run.replace_tracked_at`."""
+
+    def it_replaces_text_at_specified_offsets(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello World\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        run.replace_tracked_at(start=6, end=11, replace_text="Universe", author="Tester")
+
+        del_elements = p.xpath(".//w:del")
+        ins_elements = p.xpath(".//w:ins")
+        assert len(del_elements) == 1
+        assert len(ins_elements) == 1
+        del_text = del_elements[0].xpath(".//w:delText")[0]
+        ins_text = ins_elements[0].xpath(".//w:t")[0]
+        assert del_text.text == "World"
+        assert ins_text.text == "Universe"
+
+    def it_preserves_text_before_replacement(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello World\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        run.replace_tracked_at(start=6, end=11, replace_text="Universe", author="Tester")
+
+        before_runs = p.xpath("./w:r/w:t[text()='Hello ']")
+        assert len(before_runs) == 1
+
+    def it_preserves_text_after_replacement(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello World!\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        run.replace_tracked_at(start=6, end=11, replace_text="Universe", author="Tester")
+
+        after_runs = p.xpath("./w:r/w:t[text()='!']")
+        assert len(after_runs) == 1
+
+    def it_handles_replacement_at_start_of_run(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello World\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        run.replace_tracked_at(start=0, end=5, replace_text="Hi", author="Tester")
+
+        del_text = p.xpath(".//w:delText")[0]
+        ins_text = p.xpath(".//w:ins//w:t")[0]
+        assert del_text.text == "Hello"
+        assert ins_text.text == "Hi"
+
+    def it_handles_replacement_at_end_of_run(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello World\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        run.replace_tracked_at(start=6, end=11, replace_text="Everyone", author="Tester")
+
+        del_text = p.xpath(".//w:delText")[0]
+        ins_text = p.xpath(".//w:ins//w:t")[0]
+        assert del_text.text == "World"
+        assert ins_text.text == "Everyone"
+
+    def it_raises_on_invalid_offsets(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        with pytest.raises(ValueError, match="Invalid offsets"):
+            run.replace_tracked_at(start=10, end=15, replace_text="test", author="Tester")
+
+    def it_raises_when_start_equals_end(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        with pytest.raises(ValueError, match="Invalid offsets"):
+            run.replace_tracked_at(start=3, end=3, replace_text="test", author="Tester")
+
+    def it_raises_when_start_greater_than_end(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello\"")
+        r = p[0]
+        run = Run(r, document_part_)
+
+        with pytest.raises(ValueError, match="Invalid offsets"):
+            run.replace_tracked_at(start=4, end=2, replace_text="test", author="Tester")
+
+    @pytest.fixture
+    def document_part_(self, request: FixtureRequest):
+        from docx.parts.document import DocumentPart
+
+        return instance_mock(request, DocumentPart)
+
+
+class DescribeParagraph_replace_tracked_at:
+    """Unit-test suite for `Paragraph.replace_tracked_at`."""
+
+    def it_replaces_text_within_single_run(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello World\"")
+        paragraph = Paragraph(p, document_part_)
+
+        paragraph.replace_tracked_at(start=6, end=11, replace_text="Universe", author="Tester")
+
+        del_elements = p.xpath(".//w:del")
+        ins_elements = p.xpath(".//w:ins")
+        assert len(del_elements) == 1
+        assert len(ins_elements) == 1
+        del_text = del_elements[0].xpath(".//w:delText")[0]
+        ins_text = ins_elements[0].xpath(".//w:t")[0]
+        assert del_text.text == "World"
+        assert ins_text.text == "Universe"
+
+    def it_replaces_text_spanning_multiple_runs(self, document_part_: Mock):
+        p = element("w:p/(w:r/w:t\"Hello \",w:r/w:t\"World\")")
+        paragraph = Paragraph(p, document_part_)
+
+        paragraph.replace_tracked_at(start=4, end=9, replace_text="X", author="Tester")
+
+        del_elements = p.xpath(".//w:del")
+        ins_elements = p.xpath(".//w:ins")
+        assert len(del_elements) == 1
+        assert len(ins_elements) == 1
+        del_text = del_elements[0].xpath(".//w:delText")[0]
+        ins_text = ins_elements[0].xpath(".//w:t")[0]
+        assert del_text.text == "o Wor"
+        assert ins_text.text == "X"
+
+    def it_preserves_text_before_and_after_multi_run_replacement(self, document_part_: Mock):
+        p = element("w:p/(w:r/w:t\"Hello \",w:r/w:t\"World\")")
+        paragraph = Paragraph(p, document_part_)
+
+        paragraph.replace_tracked_at(start=4, end=9, replace_text="X", author="Tester")
+
+        before_runs = p.xpath("./w:r/w:t[text()='Hell']")
+        after_runs = p.xpath("./w:r/w:t[text()='ld']")
+        assert len(before_runs) == 1
+        assert len(after_runs) == 1
+
+    def it_raises_on_invalid_offsets(self, document_part_: Mock):
+        p = element("w:p/w:r/w:t\"Hello\"")
+        paragraph = Paragraph(p, document_part_)
+
+        with pytest.raises(ValueError, match="Invalid offsets"):
+            paragraph.replace_tracked_at(start=10, end=15, replace_text="test", author="Tester")
+
+    def it_raises_on_empty_paragraph(self, document_part_: Mock):
+        p = element("w:p")
+        paragraph = Paragraph(p, document_part_)
+
+        with pytest.raises(ValueError, match="Invalid offsets"):
+            paragraph.replace_tracked_at(start=0, end=5, replace_text="test", author="Tester")
+
+    @pytest.fixture
+    def document_part_(self, request: FixtureRequest):
+        from docx.parts.document import DocumentPart
+
+        return instance_mock(request, DocumentPart)
+
+
 class DescribeParagraph_replace_tracked:
     """Unit-test suite for `Paragraph.replace_tracked`."""
 
