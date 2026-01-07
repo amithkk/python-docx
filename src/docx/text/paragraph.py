@@ -8,6 +8,9 @@ import datetime as dt
 
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml.ns import qn
+from docx.oxml.parser import OxmlElement
+from docx.oxml.text.run import CT_R
+from docx.revision import TrackedDeletion, TrackedInsertion
 from docx.shared import StoryChild
 from docx.styles.style import ParagraphStyle
 from docx.text.hyperlink import Hyperlink
@@ -19,7 +22,6 @@ if TYPE_CHECKING:
     import docx.types as t
     from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
     from docx.oxml.text.paragraph import CT_P
-    from docx.revision import TrackedDeletion, TrackedInsertion
     from docx.styles.style import CharacterStyle
 
 
@@ -67,9 +69,6 @@ class Paragraph(StoryChild):
         Returns:
             A TrackedInsertion object wrapping the `w:ins` element.
         """
-        from docx.oxml.parser import OxmlElement
-        from docx.revision import TrackedInsertion
-
         if revision_id is None:
             revision_id = self._next_revision_id()
 
@@ -176,8 +175,6 @@ class Paragraph(StoryChild):
             Run, Hyperlink, TrackedInsertion, or TrackedDeletion objects in
             document order.
         """
-        from docx.revision import TrackedDeletion, TrackedInsertion
-
         if include_revisions:
             elements = self._p.inner_content_with_revisions
         else:
@@ -277,10 +274,6 @@ class Paragraph(StoryChild):
         Returns:
             The number of replacements made.
         """
-        from docx.oxml.parser import OxmlElement
-        from docx.oxml.text.run import CT_R
-        from typing import cast as typing_cast
-
         count = 0
         now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -367,7 +360,7 @@ class Paragraph(StoryChild):
                         parent.insert(insert_idx, comment_end)
                         insert_idx += 1
 
-                        comment_ref_run = typing_cast(CT_R, OxmlElement("w:r"))
+                        comment_ref_run = cast(CT_R, OxmlElement("w:r"))
                         comment_ref_rPr = comment_ref_run.get_or_add_rPr()
                         comment_ref_rPr.style = "CommentReference"
                         comment_ref_run.append(

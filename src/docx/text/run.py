@@ -10,7 +10,9 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_BREAK
 from docx.oxml.drawing import CT_Drawing
 from docx.oxml.ns import qn
+from docx.oxml.parser import OxmlElement
 from docx.oxml.text.pagebreak import CT_LastRenderedPageBreak
+from docx.revision import TrackedDeletion
 from docx.shape import InlineShape
 from docx.shared import StoryChild
 from docx.styles.style import CharacterStyle
@@ -21,7 +23,6 @@ if TYPE_CHECKING:
     import docx.types as t
     from docx.enum.text import WD_UNDERLINE
     from docx.oxml.text.run import CT_R, CT_Text
-    from docx.revision import TrackedDeletion
     from docx.shared import Length
 
 
@@ -134,9 +135,6 @@ class Run(StoryChild):
         Returns:
             A TrackedDeletion object wrapping the `w:del` element.
         """
-        from docx.oxml.parser import OxmlElement
-        from docx.revision import TrackedDeletion
-
         if revision_id is None:
             revision_id = self._next_revision_id()
 
