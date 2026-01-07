@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import IO, TYPE_CHECKING, Iterator, cast
 
 from docx.drawing import Drawing
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_BREAK
 from docx.oxml.drawing import CT_Drawing
+from docx.oxml.ns import qn
 from docx.oxml.text.pagebreak import CT_LastRenderedPageBreak
 from docx.shape import InlineShape
 from docx.shared import StoryChild
@@ -19,6 +21,7 @@ if TYPE_CHECKING:
     import docx.types as t
     from docx.enum.text import WD_UNDERLINE
     from docx.oxml.text.run import CT_R, CT_Text
+    from docx.revision import TrackedDeletion
     from docx.shared import Length
 
 
@@ -116,6 +119,64 @@ class Run(StoryChild):
         """
         self._r.clear_content()
         return self
+
+    def delete_tracked(self, author: str = "", revision_id: int | None = None) -> TrackedDeletion:
+        """Mark this run as deleted with track changes.
+
+        Instead of removing the run, it is wrapped in a `w:del` element to mark it
+        as deleted content when track changes is enabled. The run remains in the
+        document but is displayed as deleted text (e.g., with strikethrough).
+
+        Args:
+            author: Author name for the revision. Defaults to empty string.
+            revision_id: Unique ID for this revision. Auto-generated if not provided.
+
+        Returns:
+            A TrackedDeletion object wrapping the `w:del` element.
+        """
+        from docx.oxml.parser import OxmlElement
+        from docx.revision import TrackedDeletion
+
+        if revision_id is None:
+            revision_id = self._next_revision_id()
+
+        parent = self._r.getparent()
+        if parent is None:
+            raise ValueError("Run has no parent element")
+
+        del_elem = OxmlElement(
+            "w:del",
+            attrs={
+                qn("w:id"): str(revision_id),
+                qn("w:author"): author,
+                qn("w:date"): dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            },
+        )
+
+        for t_elem in self._r.findall(qn("w:t")):
+            delText = OxmlElement("w:delText")
+            delText.text = t_elem.text
+            if t_elem.get(qn("xml:space")) == "preserve":
+                delText.set(qn("xml:space"), "preserve")
+            t_elem.getparent().replace(t_elem, delText)  # pyright: ignore[reportOptionalMemberAccess]
+
+        index = list(parent).index(self._r)
+        parent.insert(index, del_elem)
+        del_elem.append(self._r)
+
+        return TrackedDeletion(del_elem, self._parent)  # pyright: ignore[reportArgumentType]
+
+    def _next_revision_id(self) -> int:
+        """Generate the next unique revision ID for this document."""
+        max_id = 0
+        for ins_or_del in self._r.xpath("//w:ins | //w:del"):
+            id_val = ins_or_del.get(qn("w:id"))  # pyright: ignore[reportUnknownMemberType]
+            if id_val is not None:
+                try:
+                    max_id = max(max_id, int(id_val))
+                except ValueError:
+                    pass
+        return max_id + 1
 
     @property
     def contains_page_break(self) -> bool:
