@@ -69,6 +69,65 @@ paragraphs::
     ...         paragraph.replace_tracked("draft", "final", author="Editor")
 
 
+Offset-Based Replacement
+------------------------
+
+When you already know the exact character positions (e.g., from regex matching or
+external analysis), you can use offset-based replacement instead of text matching.
+This is more precise and avoids the overhead of text searching.
+
+**Paragraph-level replacement:**
+
+Replace text at specific character offsets relative to ``paragraph.text``::
+
+    >>> paragraph = document.add_paragraph("Hello World, welcome!")
+    >>> # Replace characters 6-11 ("World") with "Universe"
+    >>> paragraph.replace_tracked_at(
+    ...     start=6,
+    ...     end=11,
+    ...     replace_text="Universe",
+    ...     author="Script",
+    ...     comment="Expanded scope",  # optional
+    ... )
+    >>> paragraph.text
+    'Hello Universe, welcome!'
+
+This works even when the text spans multiple runs::
+
+    >>> # If paragraph has: Run1="Hello ", Run2="World"
+    >>> # And you want to replace chars 4-9 ("o Wor")
+    >>> paragraph.replace_tracked_at(start=4, end=9, replace_text="X", author="Script")
+
+**Run-level replacement:**
+
+Replace text at offsets within a single run::
+
+    >>> run = paragraph.runs[0]
+    >>> # Replace characters 0-5 of this run
+    >>> run.replace_tracked_at(start=0, end=5, replace_text="Hi", author="Script")
+
+**Common use case - regex replacement:**
+
+Combine Python's ``re`` module with offset-based replacement::
+
+    >>> import re
+    >>> paragraph = document.add_paragraph("Contact: john@example.com or jane@test.org")
+    >>> # Find all email addresses and replace with [REDACTED]
+    >>> text = paragraph.text
+    >>> for match in reversed(list(re.finditer(r'\S+@\S+', text))):
+    ...     paragraph.replace_tracked_at(
+    ...         start=match.start(),
+    ...         end=match.end(),
+    ...         replace_text="[REDACTED]",
+    ...         author="Privacy Bot",
+    ...     )
+
+.. note::
+
+    Use ``reversed()`` when making multiple replacements to avoid offset shifts.
+    Replacing from end to start ensures earlier offsets remain valid.
+
+
 Adding Tracked Insertions
 -------------------------
 

@@ -252,6 +252,312 @@ class Paragraph(StoryChild):
         self.clear()
         self.add_run(text)
 
+    def replace_tracked_at(
+        self,
+        start: int,
+        end: int,
+        replace_text: str,
+        author: str = "",
+        comment: str | None = None,
+    ) -> None:
+        """Replace text at character offsets `start` to `end` using track changes.
+
+        Creates a tracked deletion of the text at positions [start, end) and a tracked
+        insertion of `replace_text` at that position. The offsets are relative to
+        `paragraph.text`.
+
+        Args:
+            start: Starting character offset (0-based, inclusive).
+            end: Ending character offset (0-based, exclusive).
+            replace_text: Text to insert in place of the deleted text.
+            author: Author name for the revision. Defaults to empty string.
+            comment: Optional comment text to attach to the replacement.
+
+        Raises:
+            ValueError: If start or end are out of bounds or start >= end.
+        """
+        para_text = self.text
+        if start < 0 or end > len(para_text) or start >= end:
+            raise ValueError(
+                f"Invalid offsets: start={start}, end={end} for text of length {len(para_text)}"
+            )
+
+        run_boundaries = self._get_run_boundaries()
+        if not run_boundaries:
+            raise ValueError("Paragraph has no runs")
+
+        start_run_idx, start_offset_in_run = self._find_run_at_offset(run_boundaries, start)
+        end_run_idx, end_offset_in_run = self._find_run_at_offset(run_boundaries, end)
+
+        now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        runs = list(self.runs)
+
+        if start_run_idx == end_run_idx:
+            run = runs[start_run_idx]
+            self._replace_within_single_run(
+                run, start_offset_in_run, end_offset_in_run, replace_text, author, now, comment
+            )
+        else:
+            self._replace_across_multiple_runs(
+                runs,
+                start_run_idx,
+                start_offset_in_run,
+                end_run_idx,
+                end_offset_in_run,
+                replace_text,
+                author,
+                now,
+                comment,
+            )
+
+    def _get_run_boundaries(self) -> List[tuple[int, int, int]]:
+        """Return list of (run_index, start_offset, end_offset) for each run."""
+        boundaries = []
+        offset = 0
+        for i, run in enumerate(self.runs):
+            run_len = len(run.text)
+            boundaries.append((i, offset, offset + run_len))
+            offset += run_len
+        return boundaries
+
+    def _find_run_at_offset(
+        self, boundaries: List[tuple[int, int, int]], offset: int
+    ) -> tuple[int, int]:
+        """Find which run contains the given offset and the offset within that run."""
+        for run_idx, run_start, run_end in boundaries:
+            if run_start <= offset < run_end:
+                return run_idx, offset - run_start
+            elif offset == run_end and run_idx == len(boundaries) - 1:
+                return run_idx, offset - run_start
+        last_idx, last_start, _ = boundaries[-1]
+        return last_idx, offset - last_start
+
+    def _replace_within_single_run(
+        self,
+        run: Run,
+        start_in_run: int,
+        end_in_run: int,
+        replace_text: str,
+        author: str,
+        now: str,
+        comment: str | None,
+    ) -> None:
+        """Replace text within a single run using tracked changes."""
+        text = run.text
+        deleted_text = text[start_in_run:end_in_run]
+        before_text = text[:start_in_run]
+        after_text = text[end_in_run:]
+
+        r_elem = run._r
+        parent = r_elem.getparent()
+        if parent is None:
+            return
+
+        index = list(parent).index(r_elem)
+        parent.remove(r_elem)
+
+        insert_idx = index
+
+        if before_text:
+            before_r = OxmlElement("w:r")
+            before_t = OxmlElement("w:t")
+            before_t.text = before_text
+            if before_text.startswith(" ") or before_text.endswith(" "):
+                before_t.set(qn("xml:space"), "preserve")
+            before_r.append(before_t)
+            parent.insert(insert_idx, before_r)
+            insert_idx += 1
+
+        rev_id = self._next_revision_id()
+        del_elem = OxmlElement(
+            "w:del",
+            attrs={
+                qn("w:id"): str(rev_id),
+                qn("w:author"): author,
+                qn("w:date"): now,
+            },
+        )
+        del_r = OxmlElement("w:r")
+        del_text_elem = OxmlElement("w:delText")
+        del_text_elem.text = deleted_text
+        del_r.append(del_text_elem)
+        del_elem.append(del_r)
+        parent.insert(insert_idx, del_elem)
+        insert_idx += 1
+
+        comment_id = None
+        if comment:
+            doc_comments = self.part._document_part.comments  # pyright: ignore[reportAttributeAccessIssue]
+            comment_obj = doc_comments.add_comment(text=comment, author=author)
+            comment_id = comment_obj.comment_id
+            comment_start = OxmlElement(
+                "w:commentRangeStart", attrs={qn("w:id"): str(comment_id)}
+            )
+            parent.insert(insert_idx, comment_start)
+            insert_idx += 1
+
+        rev_id = self._next_revision_id()
+        ins_elem = OxmlElement(
+            "w:ins",
+            attrs={
+                qn("w:id"): str(rev_id),
+                qn("w:author"): author,
+                qn("w:date"): now,
+            },
+        )
+        ins_r = OxmlElement("w:r")
+        ins_t = OxmlElement("w:t")
+        ins_t.text = replace_text
+        ins_r.append(ins_t)
+        ins_elem.append(ins_r)
+        parent.insert(insert_idx, ins_elem)
+        insert_idx += 1
+
+        if comment_id is not None:
+            comment_end = OxmlElement(
+                "w:commentRangeEnd", attrs={qn("w:id"): str(comment_id)}
+            )
+            parent.insert(insert_idx, comment_end)
+            insert_idx += 1
+            comment_ref_run = cast(CT_R, OxmlElement("w:r"))
+            comment_ref_rPr = comment_ref_run.get_or_add_rPr()
+            comment_ref_rPr.style = "CommentReference"
+            comment_ref_run.append(
+                OxmlElement("w:commentReference", attrs={qn("w:id"): str(comment_id)})
+            )
+            parent.insert(insert_idx, comment_ref_run)
+            insert_idx += 1
+
+        if after_text:
+            after_r = OxmlElement("w:r")
+            after_t = OxmlElement("w:t")
+            after_t.text = after_text
+            if after_text.startswith(" ") or after_text.endswith(" "):
+                after_t.set(qn("xml:space"), "preserve")
+            after_r.append(after_t)
+            parent.insert(insert_idx, after_r)
+
+    def _replace_across_multiple_runs(
+        self,
+        runs: List[Run],
+        start_run_idx: int,
+        start_offset_in_run: int,
+        end_run_idx: int,
+        end_offset_in_run: int,
+        replace_text: str,
+        author: str,
+        now: str,
+        comment: str | None,
+    ) -> None:
+        """Replace text that spans multiple runs using tracked changes."""
+        start_run = runs[start_run_idx]
+        start_text = start_run.text
+        before_text = start_text[:start_offset_in_run]
+        deleted_from_start = start_text[start_offset_in_run:]
+
+        end_run = runs[end_run_idx]
+        end_text = end_run.text
+        deleted_from_end = end_text[:end_offset_in_run]
+        after_text = end_text[end_offset_in_run:]
+
+        middle_deleted = ""
+        for i in range(start_run_idx + 1, end_run_idx):
+            middle_deleted += runs[i].text
+
+        full_deleted_text = deleted_from_start + middle_deleted + deleted_from_end
+
+        start_r_elem = start_run._r
+        parent = start_r_elem.getparent()
+        if parent is None:
+            return
+
+        index = list(parent).index(start_r_elem)
+        for i in range(start_run_idx, end_run_idx + 1):
+            run_elem = runs[i]._r
+            if run_elem.getparent() is parent:
+                parent.remove(run_elem)
+
+        insert_idx = index
+
+        if before_text:
+            before_r = OxmlElement("w:r")
+            before_t = OxmlElement("w:t")
+            before_t.text = before_text
+            if before_text.startswith(" ") or before_text.endswith(" "):
+                before_t.set(qn("xml:space"), "preserve")
+            before_r.append(before_t)
+            parent.insert(insert_idx, before_r)
+            insert_idx += 1
+
+        rev_id = self._next_revision_id()
+        del_elem = OxmlElement(
+            "w:del",
+            attrs={
+                qn("w:id"): str(rev_id),
+                qn("w:author"): author,
+                qn("w:date"): now,
+            },
+        )
+        del_r = OxmlElement("w:r")
+        del_text_elem = OxmlElement("w:delText")
+        del_text_elem.text = full_deleted_text
+        del_r.append(del_text_elem)
+        del_elem.append(del_r)
+        parent.insert(insert_idx, del_elem)
+        insert_idx += 1
+
+        comment_id = None
+        if comment:
+            doc_comments = self.part._document_part.comments  # pyright: ignore[reportAttributeAccessIssue]
+            comment_obj = doc_comments.add_comment(text=comment, author=author)
+            comment_id = comment_obj.comment_id
+            comment_start = OxmlElement(
+                "w:commentRangeStart", attrs={qn("w:id"): str(comment_id)}
+            )
+            parent.insert(insert_idx, comment_start)
+            insert_idx += 1
+
+        rev_id = self._next_revision_id()
+        ins_elem = OxmlElement(
+            "w:ins",
+            attrs={
+                qn("w:id"): str(rev_id),
+                qn("w:author"): author,
+                qn("w:date"): now,
+            },
+        )
+        ins_r = OxmlElement("w:r")
+        ins_t = OxmlElement("w:t")
+        ins_t.text = replace_text
+        ins_r.append(ins_t)
+        ins_elem.append(ins_r)
+        parent.insert(insert_idx, ins_elem)
+        insert_idx += 1
+
+        if comment_id is not None:
+            comment_end = OxmlElement(
+                "w:commentRangeEnd", attrs={qn("w:id"): str(comment_id)}
+            )
+            parent.insert(insert_idx, comment_end)
+            insert_idx += 1
+            comment_ref_run = cast(CT_R, OxmlElement("w:r"))
+            comment_ref_rPr = comment_ref_run.get_or_add_rPr()
+            comment_ref_rPr.style = "CommentReference"
+            comment_ref_run.append(
+                OxmlElement("w:commentReference", attrs={qn("w:id"): str(comment_id)})
+            )
+            parent.insert(insert_idx, comment_ref_run)
+            insert_idx += 1
+
+        if after_text:
+            after_r = OxmlElement("w:r")
+            after_t = OxmlElement("w:t")
+            after_t.text = after_text
+            if after_text.startswith(" ") or after_text.endswith(" "):
+                after_t.set(qn("xml:space"), "preserve")
+            after_r.append(after_t)
+            parent.insert(insert_idx, after_r)
+
     def replace_tracked(
         self,
         search_text: str,

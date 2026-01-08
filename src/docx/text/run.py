@@ -164,6 +164,101 @@ class Run(StoryChild):
 
         return TrackedDeletion(del_elem, self._parent)  # pyright: ignore[reportArgumentType]
 
+    def replace_tracked_at(
+        self,
+        start: int,
+        end: int,
+        replace_text: str,
+        author: str = "",
+    ) -> None:
+        """Replace text at character offsets `start` to `end` using track changes.
+
+        Creates a tracked deletion of the text at positions [start, end) and a tracked
+        insertion of `replace_text` at that position.
+
+        Args:
+            start: Starting character offset (0-based, inclusive).
+            end: Ending character offset (0-based, exclusive).
+            replace_text: Text to insert in place of the deleted text.
+            author: Author name for the revision. Defaults to empty string.
+
+        Raises:
+            ValueError: If start or end are out of bounds or start >= end.
+        """
+        text = self.text
+        if start < 0 or end > len(text) or start >= end:
+            raise ValueError(
+                f"Invalid offsets: start={start}, end={end} for text of length {len(text)}"
+            )
+
+        now = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        deleted_text = text[start:end]
+        before_text = text[:start]
+        after_text = text[end:]
+
+        r_elem = self._r
+        parent = r_elem.getparent()
+        if parent is None:
+            raise ValueError("Run has no parent element")
+
+        index = list(parent).index(r_elem)
+        parent.remove(r_elem)
+
+        insert_idx = index
+
+        if before_text:
+            before_r = OxmlElement("w:r")
+            before_t = OxmlElement("w:t")
+            before_t.text = before_text
+            if before_text.startswith(" ") or before_text.endswith(" "):
+                before_t.set(qn("xml:space"), "preserve")
+            before_r.append(before_t)
+            parent.insert(insert_idx, before_r)
+            insert_idx += 1
+
+        rev_id = self._next_revision_id()
+        del_elem = OxmlElement(
+            "w:del",
+            attrs={
+                qn("w:id"): str(rev_id),
+                qn("w:author"): author,
+                qn("w:date"): now,
+            },
+        )
+        del_r = OxmlElement("w:r")
+        del_text_elem = OxmlElement("w:delText")
+        del_text_elem.text = deleted_text
+        del_r.append(del_text_elem)
+        del_elem.append(del_r)
+        parent.insert(insert_idx, del_elem)
+        insert_idx += 1
+
+        rev_id = self._next_revision_id()
+        ins_elem = OxmlElement(
+            "w:ins",
+            attrs={
+                qn("w:id"): str(rev_id),
+                qn("w:author"): author,
+                qn("w:date"): now,
+            },
+        )
+        ins_r = OxmlElement("w:r")
+        ins_t = OxmlElement("w:t")
+        ins_t.text = replace_text
+        ins_r.append(ins_t)
+        ins_elem.append(ins_r)
+        parent.insert(insert_idx, ins_elem)
+        insert_idx += 1
+
+        if after_text:
+            after_r = OxmlElement("w:r")
+            after_t = OxmlElement("w:t")
+            after_t.text = after_text
+            if after_text.startswith(" ") or after_text.endswith(" "):
+                after_t.set(qn("xml:space"), "preserve")
+            after_r.append(after_t)
+            parent.insert(insert_idx, after_r)
+
     def _next_revision_id(self) -> int:
         """Generate the next unique revision ID for this document."""
         max_id = 0
