@@ -408,6 +408,8 @@ class Paragraph(StoryChild):
         ins_r = OxmlElement("w:r")
         ins_t = OxmlElement("w:t")
         ins_t.text = replace_text
+        if replace_text.startswith(" ") or replace_text.endswith(" "):
+            ins_t.set(qn("xml:space"), "preserve")
         ins_r.append(ins_t)
         ins_elem.append(ins_r)
         parent.insert(insert_idx, ins_elem)
@@ -529,6 +531,8 @@ class Paragraph(StoryChild):
         ins_r = OxmlElement("w:r")
         ins_t = OxmlElement("w:t")
         ins_t.text = replace_text
+        if replace_text.startswith(" ") or replace_text.endswith(" "):
+            ins_t.set(qn("xml:space"), "preserve")
         ins_r.append(ins_t)
         ins_elem.append(ins_r)
         parent.insert(insert_idx, ins_elem)
@@ -654,6 +658,8 @@ class Paragraph(StoryChild):
                     ins_r = OxmlElement("w:r")
                     ins_t = OxmlElement("w:t")
                     ins_t.text = replace_text
+                    if replace_text.startswith(" ") or replace_text.endswith(" "):
+                        ins_t.set(qn("xml:space"), "preserve")
                     ins_r.append(ins_t)
                     ins_elem.append(ins_r)
                     parent.insert(insert_idx, ins_elem)
